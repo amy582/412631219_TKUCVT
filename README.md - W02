@@ -1,0 +1,51 @@
+# W02｜VMware 網路模式與雙 VM 排錯
+
+## 網路配置
+
+| VM | 網卡 | 模式 | IP | 用途 |
+|---|---|---|---|---|
+| dev-a | NIC 1 | NAT | 10.0.2.15 | 上網 |
+| dev-a | NIC 2 | Host-only | 192.168.56.101 | 內網互連 |
+| server-b | NIC 1 | Host-only | 192.168.56.102 | 內網互連 |
+
+## 連線驗證紀錄
+
+- [X] dev-a NAT 可上網：`ping google.com` 輸出
+- [X] 雙向互 ping 成功：貼上雙方 `ping` 輸出
+- [X] SSH 連線成功：`ssh <user>@<ip> "hostname"` 輸出
+- [X] SCP 傳檔成功：`cat /tmp/test-from-dev.txt` 在 server-b 上的輸出
+- [X] server-b 不能上網：`ping 8.8.8.8` 失敗輸出
+
+## 故障演練一：介面停用
+
+| 項目 | 故障前 | 故障中 | 回復後 |
+|---|---|---|---|
+| server-b 介面狀態 | UP | DOWN | UP |
+| dev-a ping server-b | 成功 | 失敗 |成功 |
+| dev-a SSH server-b | 成功 | 失敗 | 成功|
+
+## 故障演練二：SSH 服務停止
+
+| 項目 | 故障前 | 故障中 | 回復後 |
+|---|---|---|---|
+| ss -tlnp grep :22 | 有監聽 | 無監聽 | 有監聽 (LISTEN)|
+| dev-a ping server-b | 成功 | 成功 | 成功|
+| dev-a SSH server-b | 成功 | Connection refused | 成功 |
+
+## 排錯順序
+（寫出你的 L2 → L3 → L4 排錯步驟與每層使用的命令）
+1.L2 (Data Link)：檢查虛擬機網卡是否連接（ip link），確認狀態為 UP。
+2.L3 (Network)：檢查 IP 位址是否在同一網段（ip addr），使用 ping 測試連通性。
+3.L4 (Transport)：檢查服務是否啟動（systemctl status ssh），使用 ss -tlnp 確認 Port 22 處於監聽狀態。
+
+## 網路拓樸圖
+（嵌入或連結 network-diagram.png）
+
+## 排錯紀錄
+- 症狀：在 dev-a 嘗試 SSH 連線 server-b 時出現 Unit ssh.service not found 或 Connection refused
+- 診斷：在 server-b 使用 systemctl status ssh 發現服務未安裝或未啟動，並確認 ss -tlnp 無 22 埠監聽。
+- 修正：將 server-b 暫時切換至 NAT 模式以連網，執行 sudo apt install openssh-server 安裝服務。
+- 驗證：切換回 Host-only 模式後，重啟服務並成功從 dev-a 透過 SSH 登入。
+
+## 設計決策
+為了模擬真實企業環境中的「隔離後端伺服器」。這能確保資料庫或應用伺服器不會直接暴露於外部網路，僅允許經過授權的跳板機 (即 dev-a) 透過內網進行管理，大幅提升安全性。
