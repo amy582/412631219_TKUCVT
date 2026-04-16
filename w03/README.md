@@ -87,7 +87,6 @@ graph LR
     Bastion -- SSH:22 --> App[App .102]
     Bastion -- SSH:22 --> DB[DB .103]
     App -- SQL:3306 --> DB
-**` ``` `**
 
 ## 排錯紀錄
 - **症狀**：安裝 openssh-server 時出現 Killed process 或卡在 0%。
