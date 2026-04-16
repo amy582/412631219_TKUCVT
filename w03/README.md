@@ -80,12 +80,14 @@ Timeout：代表封包被防火牆直接丟棄（Drop），連線方完全收不
 Refused：代表網路是通的，但目標主機的 SSH 服務沒開，主動回傳 RST 訊息拒絕。這指向應用層服務未啟動。
 
 ## 網路拓樸圖
+
+```mermaid
 graph LR
-User((User)) -- SSH:2222 --> Bastion[Bastion .101]
-Bastion -- SSH:22 --> App[App .102]
-Bastion -- SSH:22 --> DB[DB .103]
-App -- SQL:3306 --> DB
-```
+    User((User)) -- SSH:2222 --> Bastion[Bastion .101]
+    Bastion -- SSH:22 --> App[App .102]
+    Bastion -- SSH:22 --> DB[DB .103]
+    App -- SQL:3306 --> DB
+**` ``` `**
 
 ## 排錯紀錄
 - **症狀**：安裝 openssh-server 時出現 Killed process 或卡在 0%。
