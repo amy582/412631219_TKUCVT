@@ -1,0 +1,98 @@
+# W04｜Linux 系統基礎：檔案系統、權限、程序與服務管理
+
+## FHS 路徑表
+
+| FHS 路徑 | FHS 定義 | Docker 用途 |
+|---|---|---|
+| /etc/docker/ | 系統級設定檔目錄 | 存放 daemon.json 等 Docker 引擎的啟動與進階設定檔 |
+| /var/lib/docker/ | 程式持久性狀態資料目錄 | 存放 Images (映像檔)、Containers (容器)、Volumes (磁碟卷) 等實際數據 |
+| /usr/bin/docker | 使用者可執行檔 (Binaries) | Docker Client (CLI) 的執行檔路徑，供使用者輸入指令 |
+| /run/docker.sock | 執行期暫存檔案 (Unix Socket) | Docker Client 與 Docker Daemon 溝通的「門戶」，屬於 IPC 通訊 |
+
+## Docker 系統資訊
+
+- Storage Driver：overlay2
+- Docker Root Dir：/var/lib/docker
+- 拉取映像前 /var/lib/docker/ 大小：約 100MB (視初始狀態而定)
+- 拉取映像後 /var/lib/docker/ 大小：約 250MB (視拉取的 Image 大小而定)
+
+
+
+## 權限結構
+
+### Docker Socket 權限解讀
+輸出：srw-rw---- 1 root docker 0 Apr 23 13:31 /var/run/docker.sock
+s: 代表這是一個 Socket 檔案。
+
+root (owner): 擁有 rw (讀寫) 權限。
+
+docker (group): 擁有 rw (讀寫) 權限，這也是為什麼加入 docker 群組後不需 sudo。
+
+others: 完全沒有權限 ---。
+（貼上 `ls -la /var/run/docker.sock` 輸出，逐欄說明 owner/group/others 的權限）
+
+### 使用者群組
+輸出：uid=1000(user) gid=1000(user) groups=1000(user),998(docker)
+
+說明: 使用者已成功加入 docker 群組，因此具備對 /var/run/docker.sock 的讀寫權限。
+（貼上 `id` 輸出，說明是否包含 docker 群組）
+
+### 安全意涵
+（用自己的話說明為什麼 docker group ≈ root，安全示範的觀察結果）
+因為 docker.sock 的群組權限給了 docker group，任何在這個群組的使用者都能對 Docker Daemon 下達指令。由於 Docker 啟動容器時通常以 root 權限執行，使用者可以透過掛載主機根目錄到容器內的方式，輕易取得主機的 root 存取權。因此 docker group 權限等同於 root (group membership is root equivalent)。
+
+## 程序與服務管理
+
+### systemctl status docker
+輸出重點：Active: active (running)，且可以看到 Main PID 以及啟動時間。
+
+### journalctl 日誌分析
+重點摘錄：可以看到 Loading containers: done. 或 Default bridge network with address 172.17.0.1/16。這代表 Docker 引擎已成功初始化網路橋接器並載入現有容器。
+
+### CLI vs Daemon 差異
+docker --version 只是詢問 Client (執行檔) 的版本，不需要跟後台連線也能執行。而 docker ps 需要與 Daemon 溝通。如果 Daemon 沒開，前者正常但後者會報錯。這說明了「工具還在，但服務沒開」。
+
+## 環境變數
+
+- $PATH：包含 /usr/bin，所以可以直接輸入 docker 指令。
+- which docker：usr/bin/docker
+- 容器內外環境變數差異觀察：容器內環境極簡，通常只有基本的 PATH 和 HOSTNAME，不會繼承主機的個人化設定。
+
+## 故障場景一：停止 Docker Daemon
+
+| 項目 | 故障前 | 故障中 | 回復後 |
+|---|---|---|---|
+| systemctl status docker | active | inactive (dead) | active |
+| docker --version | 正常 | 正常 | 正常 |
+| docker ps | 正常 | Cannot connect | 正常 |
+| ps aux grep dockerd | 有 process | 無 process | 有 process |
+
+## 故障場景二：破壞 Socket 權限
+
+| 項目 | 故障前 | 故障中 | 回復後 |
+|---|---|---|---|
+| ls -la docker.sock 權限 | srw-rw---- | srw------- (600) | srw-rw---- |
+| docker ps（不加 sudo） | 正常 | permission denied | 正常 |
+| sudo docker ps | 正常 | 正常 | 正常 |
+| systemctl status docker | active | active | active |
+
+## 錯誤訊息比較
+
+| 錯誤訊息 | 根因 | 診斷方向 |
+|---|---|---|
+| Cannot connect to the Docker daemon | Docker 服務根本沒啟動。 | 檢查 systemctl status docker |
+| permission denied…docker.sock | 服務有開，但你沒權限去動那個 Socket。 | 檢查 groups 或 ls -la docker.sock |
+
+差異說明: Cannot connect 指向「服務端死亡」；permission denied 指向「溝通管道被鎖住」。
+
+## 排錯紀錄
+- 症狀：虛擬機卡在 Logo 畫面，隨後出現大量的 I/O Error。
+- 診斷：檢查發現是系統軟鎖死 (soft lockup)，疑似實體電腦資源耗盡導致虛擬磁碟讀寫失敗。
+- 修正：強制重啟 VM，並減少實體電腦的記憶體負擔（關閉不必要的瀏覽器分頁）。
+- 驗證：重啟後可進入 TTY 介面並成功執行 df -h 確認硬碟掛載正常
+
+## 設計決策
+（說明本週至少 1 個技術選擇與取捨，例如：為什麼教學環境用 `usermod` 加 group 而不是每次 sudo？這個選擇的風險是什麼？）
+取捨: 這樣做能大幅提高開發效率（不用頻繁輸入 sudo 密碼），且能讓 VS Code 等開發工具自動化操作 Docker。
+
+風險: 如「安全意涵」所述，這會讓該使用者具備潛在的提權風險。在生產環境中，應嚴格控管能進入此群組的人員。
