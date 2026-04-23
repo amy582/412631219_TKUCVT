@@ -1,0 +1,118 @@
+# 期中實作 — <412631219> <蔡佩蓉>
+
+## 1. 架構與 IP 表
+
+### 網路拓樸
+```mermaid
+graph LR
+    subgraph "Windows Host (Your PC)"
+        PS[PowerShell/CMD]
+    end
+
+    subgraph "VirtualBox Internal Network (192.168.56.x)"
+        Bastion["Bastion VM (101)<br/>SSH Gateway"]
+        App["App VM (103)<br/>Docker Nginx"]
+    end
+
+    PS -- "SSH Port 22" --> Bastion
+    Bastion -- "Internal SSH/HTTP" --> App
+    App -- "Port 8080:80" --> Docker["Nginx Container"]
+
+    # 期中實作 — <412631219> <蔡佩蓉>
+# 期中實作 — <你的學號> <你的姓名>
+
+## 1. 架構與 IP 表
+
+### 網路拓樸 (Network Topology)
+```mermaid
+graph LR
+    subgraph "Windows Host (Your PC)"
+        PS[PowerShell/CMD]
+    end
+
+    subgraph "VirtualBox Internal Network (192.168.56.x)"
+        Bastion["Bastion VM (101)<br/>SSH Gateway"]
+        App["App VM (103)<br/>Docker Nginx"]
+    end
+
+    PS -- "SSH Port 22" --> Bastion
+    Bastion -- "Internal SSH/HTTP" --> App
+    App -- "Port 8080:80" --> Docker["Nginx Container"]
+
+    
+    ### 實體與虛擬網路配置表
+
+| 機器名稱 (Hostname) | 網卡 1 (NAT) | 網卡 2 (Host-Only) | 角色與服務 | 備註 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Bastion** | 10.0.2.15 | 192.168.56.101 | SSH 跳板機 / 防火牆 | 管理內網唯一入口 |
+| **App** | 10.0.2.15 | **192.168.56.103** | Docker 宿主機 (Nginx) | 介面卡名稱為 `enp0s8` |
+
+### 容器服務映射表
+
+| 容器名稱 (Container) | 內部 Port | 外部映射 (App IP) | 服務內容 |
+| :--- | :--- | :--- | :--- |
+| **web** | 80/tcp | 192.168.56.103:**8080** | Nginx 預設服務 (Part C) |
+| **midterm-web** | 80/tcp | 192.168.56.103:**8081** | 自定義學號網頁 (Bonus) |
+
+
+## 2. Part A：VM 與網路
+<命令 + 關鍵輸出>
+關鍵操作: 配置 VirtualBox Host-only Adapter，並於 /etc/netplan/ 或使用 ip addr 手動設定固定 IP。
+
+驗證方式: 在 Windows 端執行 ping 192.168.56.103 確保內網連通。
+
+## 3. Part B：金鑰、ufw、ProxyJump
+<防火牆規則表 + ssh app 成功證據>
+金鑰配置: 已產生 id_rsa 並將公鑰部署至 Bastion 與 App。
+ProxyJump: 透過 .ssh/config 設定，實現單一指令 ssh app 即可穿透跳板機。
+證據:
+連線測試: 使用 ssh app 指令，無需密碼即可透過 Bastion 跳轉至 App 內網機。
+
+## 4. Part C：Docker 服務
+<systemctl status docker + curl 輸出>
+部署命令: sudo docker run -d --name web -p 8080:80 nginx
+服務驗證: 成功從 Bastion 使用 curl -I http://192.168.56.103:8080 取得 HTTP 200 回應。
+證據:
+
+## 5. Part D：故障演練
+### 故障 1：<F1/F2/F3 擇一>
+- 注入方式：於虛擬機運行中強制中斷介面卡 2 連線。
+- 故障前：ip addr 顯示 enp0s8 狀態為 DOWN 或 IP 消失。
+- 故障中：
+- 回復後：手動執行 sudo ip link set enp0s8 up 並重新配發 IP。
+- 診斷推論：當連線出現 Destination Host Unreachable 時，代表 L2/L3 鏈路中斷，需檢查網卡驅動與配置。
+
+診斷 1：F1 網路層故障 (Interface Down)
+推論：當 ssh app 失敗時，第一時間檢查 ip addr，發現 enp0s8 網卡消失。這代表 VirtualBox 的 Host-only 適配器未正確掛載，導致 L3 路由無法到達
+解決：重新掛載虛擬網卡，並手動執行 sudo ip addr add 強制喚醒。
+
+診斷 2：F3 系統層崩潰 (System Freeze
+推論：在執行 Docker 後出現大量 ^[[[C 亂碼，這是因為 Ubuntu GUI 桌面環境與 VirtualBox 顯示驅動 (vmwgfx) 產生衝突，耗盡系統中斷資源。
+解決：切換至 TTY3 (純文字介面) 繞過 GUI。這證明了服務啟動失敗不是 Docker 指令錯，而是宿主機作業系統的資源爭用問題。
+
+### 故障 2：<另一個>
+（同上）
+注入方式：由於 Ubuntu 24.04 GUI 驅動衝突，造成系統高負載。
+故障現象：SSH 連線超時 (Timeout)，終端機出現大量亂碼 ^[[[C。
+回復方式：按下 右側 Ctrl + F3 切換至 TTY3 文字介面，關閉 GUI 以釋放資源。
+診斷推論：Timeout 不等於服務壞了。這代表系統核心忙於處理圖形渲染而丟棄了網路封包。
+證據:
+
+### 症狀辨識（若選 F1+F2 必答）
+兩個都 timeout，我怎麼分？
+看 Ping: 若 Ping 不通，是 F1 (網路斷了)；若 Ping 得通但 SSH 連不上，是 F2 (防火牆擋了)。
+看 ss -tlnp: 在 App 本機查看服務是否在監聽埠口。F1 會讓 IP 根本不顯示在監聽清單中。
+
+## 6. 反思（200 字）
+這次做完，對「分層隔離」或「timeout 不等於壞了」的理解有什麼改變？
+這次實作讓我深刻體會到「分層隔離」的重要性。在配置過程中最痛苦的是虛擬機資源卡死與網卡名稱飄移。這讓我明白，在雲端環境中，底層網路的穩定性是應用層（Docker）運行的前提。學會如何透過 ip addr 指令在黑視窗中進行故障排除，並理解「Timeout」背後的系統資源意涵，是這次期中實作最有價值的經驗。
+
+## 7. Bonus（選做）
+Bonus 1：Dockerfile 優化
+優化考量: 將 COPY index.html 放置於 FROM 指令後，能利用 Docker 的 Layer Cache 機制。當網頁內容更新時，只需重新 build 最上層，大幅縮短部署時間。
+證據: 於 Bastion 執行 curl 可見包含學號與姓名的自定義 HTML 頁面。
+
+8. Bonus 2：Cgroup 資源限制
+操作: 使用 --memory=64m 限制容器上限。
+計算: 64MB = 67,108,864 Bytes
+原理: 透過 Linux Cgroup 確保單一容器故障（如 Memory Leak）時，不會拖垮整個宿主機
